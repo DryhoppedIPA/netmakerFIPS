@@ -211,7 +211,12 @@ func GetFailOverPeerIps(peer, node *models.Node) []net.IPNet {
 					logger.Log(2, "could not retrieve ext peers for ", peer.ID.String(), err.Error())
 				}
 				for _, extPeer := range extPeers {
-					allowedips = append(allowedips, extPeer.AllowedIPs...)
+					for _, allowedIPString := range extPeer.AllowedIPs {
+						_, ipNet, err := net.ParseCIDR(allowedIPString)
+						if err == nil && ipNet != nil {
+							allowedips = append(allowedips, *ipNet)
+						}
+					}
 				}
 			}
 		}

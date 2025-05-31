@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"time"
 
 	"github.com/gravitl/netmaker/database"
 	"github.com/gravitl/netmaker/logger"
@@ -59,24 +58,6 @@ var (
 	}
 )
 
-// buildPeerConfig constructs a FIPSPeerConfig from a Node model.
-func buildPeerConfig(node *models.Node) (*models.FIPSPeerConfig, error) {
-	host, err := GetHost(node.HostID.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to get host for node %s: %w", node.ID, err)
-	}
-	if err := ValidatePublicKey(host.PublicKey); err != nil {
-		return nil, fmt.Errorf("node %s has invalid public key: %w", node.ID, err)
-	}
-	return &models.FIPSPeerConfig{
-		PublicKey:                   host.PublicKey,
-		AllowedIPs:                  []string{}, // Will be populated by the caller
-		Endpoint:                    models.UDPAddrString{UDPAddr: nil}, // Will be set by the caller
-		PersistentKeepaliveInterval: models.DurationSeconds{Duration: 25 * time.Second},
-		ReplaceAllowedIPs:           true,
-	}, nil
-}
-
 // GetHostPeerInfo - fetches required peer info per network
 func GetHostPeerInfo(host *models.Host) (models.HostPeerInfo, error) {
 	peerInfo := models.HostPeerInfo{
@@ -126,7 +107,7 @@ func GetHostPeerInfo(host *models.Host) (models.HostPeerInfo, error) {
 				nodeacls.AreNodesAllowed(nodeacls.NetworkID(node.Network), nodeacls.NodeID(node.ID.String()), nodeacls.NodeID(peer.ID.String())) &&
 				(defaultDevicePolicy.Enabled || allowedToComm) {
 
-				networkPeersInfo[peerHost.PublicKey.String()] = models.IDandAddr{
+				networkPeersInfo[peerHost.PublicKey] = models.IDandAddr{
 					ID:         peer.ID.String(),
 					HostID:     peerHost.ID.String(),
 					Address:    peer.PrimaryAddress(),
@@ -205,7 +186,6 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 	slog.Debug("peer update for host", "hostId", host.ID.String())
 	peerIndexMap := make(map[string]int)
 	for _, nodeID := range host.Nodes {
-		networkAllowAll := true
 		nodeID := nodeID
 		node, err := GetNodeByID(nodeID)
 		if err != nil {
@@ -230,7 +210,6 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 				hostPeerUpdate.FwUpdate.AllowedNetworks = append(hostPeerUpdate.FwUpdate.AllowedNetworks, node.NetworkRange6)
 			}
 		} else {
-			networkAllowAll = false
 			hostPeerUpdate.FwUpdate.AllowAll = false
 			rules := GetAclRulesForNode(&node)
 			if len(hostPeerUpdate.FwUpdate.AclRules) == 0 {
@@ -262,7 +241,7 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 			}
 			peerConfig := models.FIPSPeerConfig{
 				PublicKey:                   peerHost.PublicKey,
-				PersistentKeepaliveInterval: &peerHost.PersistentKeepalive,
+				PersistentKeepaliveInterval: models.DurationSeconds{Duration: peerHost.PersistentKeepalive},
 				ReplaceAllowedIPs:           true,
 			}
 			_, isFailOverPeer := node.FailOverPeers[peer.ID.String()]
@@ -361,10 +340,10 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 				peerEndpoint = nil
 			}
 
-			peerConfig.Endpoint = &net.UDPAddr{
+			peerConfig.Endpoint = models.UDPAddrString{UDPAddr: &net.UDPAddr{
 				IP:   peerEndpoint,
 				Port: GetPeerListenPort(peerHost),
-			}
+			}}
 
 			if uselocal {
 				peerConfig.Endpoint.Port = peerHost.ListenPort
@@ -380,8 +359,13 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 				peer.Connected &&
 				nodeacls.AreNodesAllowed(nodeacls.NetworkID(node.Network), nodeacls.NodeID(node.ID.String()), nodeacls.NodeID(peer.ID.String())) &&
 				(defaultDevicePolicy.Enabled || allowedToComm) &&
-				(deletedNode == nil || (deletedNode != nil && peer.ID.String() != deletedNode.ID.String())) {
-				peerConfig.AllowedIPs = GetAllowedIPs(&node, &peer, nil) // only append allowed IPs if valid connection
+				(deletedNode == nil || peer.ID.String() != deletedNode.ID.String()) {
+				allowedIPs := GetAllowedIPs(&node, &peer, nil)
+				var allowedIPsStrings []string
+				for _, ipNet := range allowedIPs {
+					allowedIPsStrings = append(allowedIPsStrings, ipNet.String())
+				}
+				peerConfig.AllowedIPs = allowedIPsStrings
 			}
 
 			var nodePeer models.FIPSPeerConfig
@@ -612,8 +596,14 @@ func GetAllowedIPs(node, peer *models.Node, metrics *models.Metrics) []net.IPNet
 			logger.Log(2, "could not retrieve ext peers for ", peer.ID.String(), err.Error())
 		}
 		for _, extPeer := range extPeers {
-
-			allowedips = append(allowedips, extPeer.AllowedIPs...)
+			result := []net.IPNet{}
+			for _, allowedIPString := range extPeer.AllowedIPs {
+				_, ipNet, err := net.ParseCIDR(allowedIPString)
+				if err == nil && ipNet != nil {
+					result = append(result, *ipNet)
+				}
+			}
+			allowedips = append(allowedips, result...)
 		}
 	}
 
@@ -649,11 +639,7 @@ func GetEgressIPs(peer *models.Node) []net.IPNet {
 			logger.Log(2, "egress IP range of ", iprange, " overlaps with ", peer.LocalAddress.String(), ", omitting")
 			continue // skip adding egress range if overlaps with node's local ip
 		}
-		if err != nil {
-			logger.Log(1, "error encountered when setting egress range", err.Error())
-		} else {
-			allowedips = append(allowedips, *ipnet)
-		}
+		allowedips = append(allowedips, *ipnet)
 	}
 	return allowedips
 }

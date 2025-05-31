@@ -878,10 +878,14 @@ func GetExtPeers(node, peer *models.Node) ([]models.FIPSPeerConfig, []models.IDa
 		if primaryAddr == "" {
 			primaryAddr = extPeer.Address6
 		}
+		var allowedIPsStrings []string
+		for _, ipNet := range allowedips {
+			allowedIPsStrings = append(allowedIPsStrings, ipNet.String())
+		}
 		peer = models.FIPSPeerConfig{
 			PublicKey:         extPeer.PublicKey,
 			ReplaceAllowedIPs: true,
-			AllowedIPs:        allowedips,
+			AllowedIPs:        allowedIPsStrings,
 		}
 		peers = append(peers, peer)
 		idsAndAddr = append(idsAndAddr, models.IDandAddr{

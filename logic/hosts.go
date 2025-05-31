@@ -201,7 +201,7 @@ func GetHostByPubKey(hostPubKey string) (*models.Host, error) {
 		return nil, err
 	}
 	for _, host := range hosts {
-		if host.PublicKey.String() == hostPubKey {
+		if host.PublicKey == hostPubKey {
 			return &host, nil
 		}
 	}
