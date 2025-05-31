@@ -5,10 +5,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -30,6 +34,28 @@ import (
 
 var version = "v0.90.0"
 
+func verifyFIPSEnvironment() {
+	// 1. Check OS-level FIPS flag
+	data, err := ioutil.ReadFile("/proc/sys/crypto/fips_enabled")
+	if err != nil {
+		log.Fatal("Failed to read /proc/sys/crypto/fips_enabled: ", err)
+	}
+	if strings.TrimSpace(string(data)) != "1" {
+		log.Fatal("FIPS mode is not enabled on this Ubuntu host; please run 'pro enable fips' and reboot")
+	}
+	log.Println("✓ OS-level FIPS mode enabled")
+
+	// 2. Check that the wireguard-go binary is the FIPS build
+	out, err := exec.Command("wireguard-go", "--version").Output()
+	if err != nil {
+		log.Fatal("Failed to run 'wireguard-go --version': ", err)
+	}
+	if !strings.Contains(string(out), "wolfCrypt FIPS") {
+		log.Fatal("WireGuard GO binary is not a wolfCrypt FIPS build; please install the correct version")
+	}
+	log.Println("✓ wireguard-go is the wolfCrypt FIPS build")
+}
+
 //	@title			NetMaker
 //	@version		0.90.0
 //	@description	NetMaker API Docs
@@ -43,6 +69,8 @@ var version = "v0.90.0"
 
 // Start DB Connection and start API Request Handler
 func main() {
+	verifyFIPSEnvironment()
+
 	absoluteConfigPath := flag.String("c", "", "absolute path to configuration file")
 	flag.Parse()
 	setupConfig(*absoluteConfigPath)

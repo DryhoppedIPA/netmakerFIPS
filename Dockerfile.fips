@@ -1,0 +1,115 @@
+# File: Dockerfile.fips
+
+############################################################
+# Stage 1: Build wolfSSL (wolfCrypt) with FIPS
+############################################################
+FROM ubuntu:22.04 AS wolfssl-builder
+
+# 1) Install build tools and dependencies (including ubuntu-fips)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        autoconf \
+        automake \
+        build-essential \
+        git \
+        libtool \
+        pkg-config \
+        wget \
+        gnupg2 \
+        software-properties-common \
+        # Enable Ubuntu Pro & FIPS (host must be attached to Ubuntu Pro)
+        ubuntu-advantage-tools \
+    && apt-get update \
+    && apt-get install -y ubuntu-fips \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2) Copy vendor/wolfssl sources into build stage
+WORKDIR /usr/src/wolfssl
+COPY vendor/wolfssl/wolfcrypt ./wolfcrypt
+COPY vendor/wolfssl/wolfssl   ./wolfssl
+
+# 3) Build and install wolfCrypt (FIPS-Ready)
+WORKDIR /usr/src/wolfssl/wolfcrypt
+RUN ./autogen.sh \
+    && ./configure --enable-fips=ready --disable-opensslextra \
+    && make \
+    && make install \
+    && ldconfig
+
+# 4) Build and install wolfSSL (links to FIPS-ready wolfCrypt)
+WORKDIR /usr/src/wolfssl/wolfssl
+RUN ./autogen.sh \
+    && ./configure --enable-fips=ready \
+                   --with-wolfcrypt=/usr/local \
+                   --disable-opensslextra \
+    && make \
+    && make install \
+    && ldconfig
+
+# 5) Build wireguard-go-fips
+WORKDIR /usr/src/osp
+# Clone the osp repo (wolfSSL's WireGuard GO patch) inside this stage
+RUN git clone https://github.com/wolfSSL/osp.git /usr/src/osp
+WORKDIR /usr/src/osp/wireguard-go
+ENV CGO_CFLAGS="-I/usr/local/include -DFIPS"
+ENV CGO_LDFLAGS="-L/usr/local/lib -lwolfssl -lwolfcrypt"
+RUN go build -o /usr/local/bin/wireguard-go-fips ./cmd/wireguard-go
+
+# Verify it is a FIPS build
+RUN strings /usr/local/bin/wireguard-go-fips | grep -q "wolfCrypt FIPS"
+
+############################################################
+# Stage 2: Build Netmaker Server
+############################################################
+FROM ubuntu:22.04 AS netmaker-builder
+
+# 1) Install Go and other dependencies (does NOT need ubuntu-fips here)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+        git \
+        golang-go \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2) Copy the entire project (including vendor/wolfssl)
+WORKDIR /usr/src/netmaker
+COPY . .
+
+# 3) Ensure Go modules are available (if using modules)
+RUN go mod download
+# 4) Build the Netmaker server binary
+RUN GOOS=linux CGO_ENABLED=1 go build -ldflags="-s -w" -tags ee -o /usr/local/bin/netmaker-server .
+
+############################################################
+# Final Stage: Assemble a Minimal Runtime Image
+############################################################
+FROM ubuntu:22.04
+
+# 1) Install runtime dependencies (e.g., libssl, ubuntu-fips, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        wget \
+        ca-certificates \
+        ubuntu-advantage-tools \
+        # Enable FIPS on the final image
+        ubuntu-fips \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2) Copy the FIPS-ready wolfCrypt/wolfSSL libraries from builder
+COPY --from=wolfssl-builder /usr/local/lib/libwolfssl.so* /usr/local/lib/
+COPY --from=wolfssl-builder /usr/local/lib/libwolfcrypt.so* /usr/local/lib/
+COPY --from=wolfssl-builder /usr/local/include/wolfssl /usr/local/include/wolfssl
+COPY --from=wolfssl-builder /usr/local/include/wolfcrypt /usr/local/include/wolfcrypt
+
+# 3) Copy the `wireguard-go-fips` binary
+COPY --from=wolfssl-builder /usr/local/bin/wireguard-go-fips /usr/local/bin/
+
+# 4) Copy the `netmaker-server` binary
+COPY --from=netmaker-builder /usr/local/bin/netmaker-server /usr/local/bin/
+
+# 5) Verify FIPS & wireguard-go-fips at container startup
+RUN strings /usr/local/bin/wireguard-go-fips | grep -q "wolfCrypt FIPS"
+
+# 6) Expose ports and set entrypoint
+EXPOSE 8080 51820/udp
+
+ENTRYPOINT ["/usr/local/bin/netmaker-server"]
+CMD ["--config", "/etc/netmaker/config.yaml"] 

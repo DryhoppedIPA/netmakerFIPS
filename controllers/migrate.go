@@ -16,7 +16,6 @@ import (
 	"github.com/gravitl/netmaker/servercfg"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/exp/slog"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 // swagger:route PUT /api/v1/nodes/migrate nodes migrateData
@@ -141,7 +140,7 @@ func convertLegacyHostNode(legacy models.LegacyNode) (models.Host, models.Node) 
 		host.ListenPort = 51821
 	}
 	host.MTU = int(legacy.MTU)
-	host.PublicKey, _ = wgtypes.ParseKey(legacy.PublicKey)
+	host.PublicKey = legacy.PublicKey
 	host.MacAddress = net.HardwareAddr(legacy.MacAddress)
 	host.TrafficKeyPublic = legacy.TrafficKeys.Mine
 	host.Nodes = append([]string{}, legacy.ID)

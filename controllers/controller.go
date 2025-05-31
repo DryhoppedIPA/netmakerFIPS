@@ -38,6 +38,7 @@ var HttpHandlers = []interface{}{
 	tagHandlers,
 	aclHandlers,
 	legacyHandlers,
+	prometheusHandlers,
 }
 
 func HandleRESTRequests(wg *sync.WaitGroup, ctx context.Context) {

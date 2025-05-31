@@ -2,8 +2,6 @@ package models
 
 import (
 	"net"
-
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 type HostPeerInfo struct {
@@ -20,8 +18,8 @@ type HostPeerUpdate struct {
 	Server          string                `json:"server"`
 	ServerVersion   string                `json:"serverversion"`
 	ServerAddrs     []ServerAddr          `json:"serveraddrs"`
-	NodePeers       []wgtypes.PeerConfig  `json:"node_peers"`
-	Peers           []wgtypes.PeerConfig  `json:"host_peers"`
+	NodePeers       []FIPSPeerConfig      `json:"node_peers"`
+	Peers           []FIPSPeerConfig      `json:"host_peers"`
 	PeerIDs         PeerMap               `json:"peerids"`
 	HostNetworkInfo HostInfoMap           `json:"host_network_info,omitempty"`
 	EgressRoutes    []EgressNetworkRoutes `json:"egress_network_routes"`
@@ -33,9 +31,9 @@ type HostPeerUpdate struct {
 }
 
 type OldPeerUpdateFields struct {
-	NodePeers         []wgtypes.PeerConfig `json:"peers" bson:"peers" yaml:"peers"`
-	OldPeers          []wgtypes.PeerConfig `json:"Peers"`
-	EndpointDetection bool                 `json:"endpoint_detection"`
+	NodePeers         []FIPSPeerConfig `json:"peers" bson:"peers" yaml:"peers"`
+	OldPeers          []FIPSPeerConfig `json:"Peers"`
+	EndpointDetection bool             `json:"endpoint_detection"`
 }
 
 type FwRule struct {

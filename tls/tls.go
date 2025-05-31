@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"filippo.io/edwards25519"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 const (
@@ -67,17 +66,6 @@ func (n *Key) Ed25519PrivateKey() (ed25519.PrivateKey, error) {
 		return ed25519.PrivateKey{}, errors.New("incorrect seed size")
 	}
 	return ed25519.NewKeyFromSeed(n.point.Bytes()), nil
-}
-
-// Key.Curve25519PrivateKey returns the private key in Montogomery form used for ECDH.
-func (n *Key) Curve25519PrivateKey() (wgtypes.Key, error) {
-	if n.point == nil {
-		return wgtypes.Key{}, errors.New("nil point")
-	}
-	if len(n.point.Bytes()) != ed25519.SeedSize {
-		return wgtypes.Key{}, errors.New("incorrect seed size")
-	}
-	return wgtypes.ParseKey(base64.StdEncoding.EncodeToString(n.point.BytesMontgomery()))
 }
 
 // Key.Save : saves the private key to path.

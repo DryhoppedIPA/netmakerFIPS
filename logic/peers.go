@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"time"
 
 	"github.com/gravitl/netmaker/database"
 	"github.com/gravitl/netmaker/logger"
@@ -13,7 +14,6 @@ import (
 	"github.com/gravitl/netmaker/servercfg"
 	"golang.org/x/exp/slices"
 	"golang.org/x/exp/slog"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 var (
@@ -58,6 +58,24 @@ var (
 		return []net.IPNet{}
 	}
 )
+
+// buildPeerConfig constructs a FIPSPeerConfig from a Node model.
+func buildPeerConfig(node *models.Node) (*models.FIPSPeerConfig, error) {
+	host, err := GetHost(node.HostID.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get host for node %s: %w", node.ID, err)
+	}
+	if err := ValidatePublicKey(host.PublicKey); err != nil {
+		return nil, fmt.Errorf("node %s has invalid public key: %w", node.ID, err)
+	}
+	return &models.FIPSPeerConfig{
+		PublicKey:                   host.PublicKey,
+		AllowedIPs:                  []string{}, // Will be populated by the caller
+		Endpoint:                    models.UDPAddrString{UDPAddr: nil}, // Will be set by the caller
+		PersistentKeepaliveInterval: models.DurationSeconds{Duration: 25 * time.Second},
+		ReplaceAllowedIPs:           true,
+	}, nil
+}
 
 // GetHostPeerInfo - fetches required peer info per network
 func GetHostPeerInfo(host *models.Host) (models.HostPeerInfo, error) {
@@ -154,8 +172,8 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 			AclRules:    make(map[string]models.AclRule),
 		},
 		PeerIDs:         make(models.PeerMap, 0),
-		Peers:           []wgtypes.PeerConfig{},
-		NodePeers:       []wgtypes.PeerConfig{},
+		Peers:           []models.FIPSPeerConfig{},
+		NodePeers:       []models.FIPSPeerConfig{},
 		HostNetworkInfo: models.HostInfoMap{},
 		ServerConfig:    servercfg.ServerInfo,
 	}
@@ -242,21 +260,21 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 				logger.Log(1, "no peer host", peer.HostID.String(), err.Error())
 				continue
 			}
-			peerConfig := wgtypes.PeerConfig{
+			peerConfig := models.FIPSPeerConfig{
 				PublicKey:                   peerHost.PublicKey,
 				PersistentKeepaliveInterval: &peerHost.PersistentKeepalive,
 				ReplaceAllowedIPs:           true,
 			}
 			_, isFailOverPeer := node.FailOverPeers[peer.ID.String()]
 			if peer.IsEgressGateway {
-				peerKey := peerHost.PublicKey.String()
+				peerKey := peerHost.PublicKey
 				if isFailOverPeer && peer.FailedOverBy.String() != node.ID.String() {
 					// get relay host
 					failOverNode, err := GetNodeByID(peer.FailedOverBy.String())
 					if err == nil {
 						relayHost, err := GetHost(failOverNode.HostID.String())
 						if err == nil {
-							peerKey = relayHost.PublicKey.String()
+							peerKey = relayHost.PublicKey
 						}
 					}
 				}
@@ -266,7 +284,7 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 					if err == nil {
 						relayHost, err := GetHost(relayNode.HostID.String())
 						if err == nil {
-							peerKey = relayHost.PublicKey.String()
+							peerKey = relayHost.PublicKey
 						}
 					}
 				}
@@ -289,12 +307,12 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 			if (node.IsRelayed && node.RelayedBy != peer.ID.String()) ||
 				(peer.IsRelayed && peer.RelayedBy != node.ID.String()) || isFailOverPeer {
 				// if node is relayed and peer is not the relay, set remove to true
-				if _, ok := peerIndexMap[peerHost.PublicKey.String()]; ok {
+				if _, ok := peerIndexMap[peerHost.PublicKey]; ok {
 					continue
 				}
 				peerConfig.Remove = true
 				hostPeerUpdate.Peers = append(hostPeerUpdate.Peers, peerConfig)
-				peerIndexMap[peerHost.PublicKey.String()] = len(hostPeerUpdate.Peers) - 1
+				peerIndexMap[peerHost.PublicKey] = len(hostPeerUpdate.Peers) - 1
 				continue
 			}
 			if node.IsRelayed && node.RelayedBy == peer.ID.String() {
@@ -366,11 +384,11 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 				peerConfig.AllowedIPs = GetAllowedIPs(&node, &peer, nil) // only append allowed IPs if valid connection
 			}
 
-			var nodePeer wgtypes.PeerConfig
-			if _, ok := peerIndexMap[peerHost.PublicKey.String()]; !ok {
+			var nodePeer models.FIPSPeerConfig
+			if _, ok := peerIndexMap[peerHost.PublicKey]; !ok {
 				hostPeerUpdate.Peers = append(hostPeerUpdate.Peers, peerConfig)
-				peerIndexMap[peerHost.PublicKey.String()] = len(hostPeerUpdate.Peers) - 1
-				hostPeerUpdate.HostNetworkInfo[peerHost.PublicKey.String()] = models.HostNetworkInfo{
+				peerIndexMap[peerHost.PublicKey] = len(hostPeerUpdate.Peers) - 1
+				hostPeerUpdate.HostNetworkInfo[peerHost.PublicKey] = models.HostNetworkInfo{
 					Interfaces:   peerHost.Interfaces,
 					ListenPort:   peerHost.ListenPort,
 					IsStaticPort: peerHost.IsStaticPort,
@@ -378,22 +396,22 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 				}
 				nodePeer = peerConfig
 			} else {
-				peerAllowedIPs := hostPeerUpdate.Peers[peerIndexMap[peerHost.PublicKey.String()]].AllowedIPs
+				peerAllowedIPs := hostPeerUpdate.Peers[peerIndexMap[peerHost.PublicKey]].AllowedIPs
 				peerAllowedIPs = append(peerAllowedIPs, peerConfig.AllowedIPs...)
-				hostPeerUpdate.Peers[peerIndexMap[peerHost.PublicKey.String()]].AllowedIPs = peerAllowedIPs
-				hostPeerUpdate.Peers[peerIndexMap[peerHost.PublicKey.String()]].Remove = false
-				hostPeerUpdate.Peers[peerIndexMap[peerHost.PublicKey.String()]].Endpoint = peerConfig.Endpoint
-				hostPeerUpdate.HostNetworkInfo[peerHost.PublicKey.String()] = models.HostNetworkInfo{
+				hostPeerUpdate.Peers[peerIndexMap[peerHost.PublicKey]].AllowedIPs = peerAllowedIPs
+				hostPeerUpdate.Peers[peerIndexMap[peerHost.PublicKey]].Remove = false
+				hostPeerUpdate.Peers[peerIndexMap[peerHost.PublicKey]].Endpoint = peerConfig.Endpoint
+				hostPeerUpdate.HostNetworkInfo[peerHost.PublicKey] = models.HostNetworkInfo{
 					Interfaces:   peerHost.Interfaces,
 					ListenPort:   peerHost.ListenPort,
 					IsStaticPort: peerHost.IsStaticPort,
 					IsStatic:     peerHost.IsStatic,
 				}
-				nodePeer = hostPeerUpdate.Peers[peerIndexMap[peerHost.PublicKey.String()]]
+				nodePeer = hostPeerUpdate.Peers[peerIndexMap[peerHost.PublicKey]]
 			}
 
 			if node.Network == network && !peerConfig.Remove && len(peerConfig.AllowedIPs) > 0 { // add to peers map for metrics
-				hostPeerUpdate.PeerIDs[peerHost.PublicKey.String()] = models.IDandAddr{
+				hostPeerUpdate.PeerIDs[peerHost.PublicKey] = models.IDandAddr{
 					ID:         peer.ID.String(),
 					HostID:     peerHost.ID.String(),
 					Address:    peer.PrimaryAddress(),
@@ -404,7 +422,7 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 				hostPeerUpdate.NodePeers = append(hostPeerUpdate.NodePeers, nodePeer)
 			}
 		}
-		var extPeers []wgtypes.PeerConfig
+		var extPeers []models.FIPSPeerConfig
 		var extPeerIDAndAddrs []models.IDandAddr
 		var egressRoutes []models.EgressNetworkRoutes
 		if node.IsIngressGateway {
@@ -454,17 +472,6 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 			}
 
 		}
-		if node.IsEgressGateway {
-			if !networkAllowAll {
-				egressInfo := hostPeerUpdate.FwUpdate.EgressInfo[node.ID.String()]
-				if egressInfo.EgressFwRules == nil {
-					egressInfo.EgressFwRules = make(map[string]models.AclRule)
-				}
-				egressInfo.EgressFwRules = GetEgressRulesForNode(node)
-				hostPeerUpdate.FwUpdate.EgressInfo[node.ID.String()] = egressInfo
-			}
-
-		}
 
 		if IsInternetGw(node) {
 			hostPeerUpdate.FwUpdate.IsEgressGw = true
@@ -506,8 +513,8 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 	if deletedNode != nil && host.OS != models.OS_Types.IoT {
 		peerHost, err := GetHost(deletedNode.HostID.String())
 		if err == nil && host.ID != peerHost.ID {
-			if _, ok := peerIndexMap[peerHost.PublicKey.String()]; !ok {
-				hostPeerUpdate.Peers = append(hostPeerUpdate.Peers, wgtypes.PeerConfig{
+			if _, ok := peerIndexMap[peerHost.PublicKey]; !ok {
+				hostPeerUpdate.Peers = append(hostPeerUpdate.Peers, models.FIPSPeerConfig{
 					PublicKey: peerHost.PublicKey,
 					Remove:    true,
 				})
@@ -527,10 +534,9 @@ func GetPeerUpdateForHost(network string, host *models.Host, allNodes []models.N
 	if len(deletedClients) > 0 {
 		for i := range deletedClients {
 			deletedClient := deletedClients[i]
-			key, err := wgtypes.ParseKey(deletedClient.PublicKey)
-			if err == nil {
-				hostPeerUpdate.Peers = append(hostPeerUpdate.Peers, wgtypes.PeerConfig{
-					PublicKey: key,
+			if err := ValidatePublicKey(deletedClient.PublicKey); err == nil {
+				hostPeerUpdate.Peers = append(hostPeerUpdate.Peers, models.FIPSPeerConfig{
+					PublicKey: deletedClient.PublicKey,
 					Remove:    true,
 				})
 			}

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 type NodeStatus string
@@ -534,7 +533,7 @@ func (ln *LegacyNode) ConvertToNewNode() (*Host, *Node) {
 		host.Name = ln.Name
 		host.ListenPort = int(ln.ListenPort)
 		host.MTU = int(ln.MTU)
-		host.PublicKey, _ = wgtypes.ParseKey(ln.PublicKey)
+		host.PublicKey = ln.PublicKey
 		host.MacAddress, _ = net.ParseMAC(ln.MacAddress)
 		host.TrafficKeyPublic = ln.TrafficKeys.Mine
 		id, _ := uuid.Parse(ln.ID)
@@ -585,7 +584,7 @@ func (n *Node) Legacy(h *Host, s *ServerConfig, net *Network) *LegacyNode {
 	l.Name = h.Name
 	l.NetworkSettings = *net
 	l.ListenPort = int32(h.ListenPort)
-	l.PublicKey = h.PublicKey.String()
+	l.PublicKey = h.PublicKey
 	l.Endpoint = h.EndpointIP.String()
 	//l.AllowedIPs =
 	l.AccessKey = ""

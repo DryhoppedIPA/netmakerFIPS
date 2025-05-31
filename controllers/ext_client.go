@@ -23,7 +23,6 @@ import (
 	"github.com/skip2/go-qrcode"
 	"golang.org/x/exp/slices"
 	"golang.org/x/exp/slog"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 func extClientHandlers(r *mux.Router) {
@@ -1058,7 +1057,7 @@ func validateCustomExtClient(customExtClient *models.CustomExtClient, checkID bo
 	}
 	//extclient.ClientID = customExtClient.ClientID
 	if len(customExtClient.PublicKey) > 0 {
-		if _, err := wgtypes.ParseKey(customExtClient.PublicKey); err != nil {
+		if err := logic.ValidatePublicKey(customExtClient.PublicKey); err != nil {
 			return errInvalidExtClientPubKey
 		}
 		//extclient.PublicKey = customExtClient.PublicKey

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 // OS_Types - list of OS types Netmaker cares about
@@ -56,7 +55,7 @@ type Host struct {
 	ListenPort          int              `json:"listenport"              yaml:"listenport"`
 	WgPublicListenPort  int              `json:"wg_public_listen_port"   yaml:"wg_public_listen_port"`
 	MTU                 int              `json:"mtu"                     yaml:"mtu"`
-	PublicKey           wgtypes.Key      `json:"publickey"               yaml:"publickey"`
+	PublicKey           string           `json:"publickey"               yaml:"publickey"`
 	MacAddress          net.HardwareAddr `json:"macaddress"              yaml:"macaddress"`
 	TrafficKeyPublic    []byte           `json:"traffickeypublic"        yaml:"traffickeypublic"`
 	Nodes               []string         `json:"nodes"                   yaml:"nodes"`

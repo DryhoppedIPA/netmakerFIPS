@@ -71,7 +71,7 @@ func (h *Host) ConvertNMHostToAPI() *ApiHost {
 	a.OS = h.OS
 	a.Nodes = h.Nodes
 	a.WgPublicListenPort = h.WgPublicListenPort
-	a.PublicKey = h.PublicKey.String()
+	a.PublicKey = h.PublicKey
 	a.Verbosity = h.Verbosity
 	a.Version = h.Version
 	a.IsDefault = h.IsDefault

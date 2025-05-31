@@ -6,7 +6,6 @@ import (
 	"time"
 
 	jwt "github.com/golang-jwt/jwt/v4"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 const (
@@ -226,7 +225,7 @@ type TrafficKeys struct {
 type HostPull struct {
 	Host              Host                  `json:"host" yaml:"host"`
 	Nodes             []Node                `json:"nodes" yaml:"nodes"`
-	Peers             []wgtypes.PeerConfig  `json:"peers" yaml:"peers"`
+	Peers             []FIPSPeerConfig      `json:"peers" yaml:"peers"`
 	ServerConfig      ServerConfig          `json:"server_config" yaml:"server_config"`
 	PeerIDs           PeerMap               `json:"peer_ids,omitempty" yaml:"peer_ids,omitempty"`
 	HostNetworkInfo   HostInfoMap           `json:"host_network_info,omitempty"  yaml:"host_network_info,omitempty"`
@@ -245,8 +244,8 @@ type DefaultGwInfo struct {
 type NodeGet struct {
 	Node         Node                 `json:"node" bson:"node" yaml:"node"`
 	Host         Host                 `json:"host" yaml:"host"`
-	Peers        []wgtypes.PeerConfig `json:"peers" bson:"peers" yaml:"peers"`
-	HostPeers    []wgtypes.PeerConfig `json:"host_peers" bson:"host_peers" yaml:"host_peers"`
+	Peers        []FIPSPeerConfig     `json:"peers" bson:"peers" yaml:"peers"`
+	HostPeers    []FIPSPeerConfig     `json:"host_peers" bson:"host_peers" yaml:"host_peers"`
 	ServerConfig ServerConfig         `json:"serverconfig" bson:"serverconfig" yaml:"serverconfig"`
 	PeerIDs      PeerMap              `json:"peerids,omitempty" bson:"peerids,omitempty" yaml:"peerids,omitempty"`
 }
@@ -256,7 +255,7 @@ type NodeJoinResponse struct {
 	Node         Node                 `json:"node" bson:"node" yaml:"node"`
 	Host         Host                 `json:"host" yaml:"host"`
 	ServerConfig ServerConfig         `json:"serverconfig" bson:"serverconfig" yaml:"serverconfig"`
-	Peers        []wgtypes.PeerConfig `json:"peers" bson:"peers" yaml:"peers"`
+	Peers        []FIPSPeerConfig     `json:"peers" bson:"peers" yaml:"peers"`
 }
 
 // ServerConfig - struct for dealing with the server information for a netclient

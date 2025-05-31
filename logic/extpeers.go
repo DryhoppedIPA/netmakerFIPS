@@ -18,7 +18,6 @@ import (
 	"github.com/gravitl/netmaker/models"
 	"github.com/gravitl/netmaker/servercfg"
 	"golang.org/x/exp/slog"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 var (
@@ -256,12 +255,17 @@ func CreateExtClient(extclient *models.ExtClient) error {
 	defer addressLock.Unlock()
 
 	if len(extclient.PublicKey) == 0 {
-		privateKey, err := wgtypes.GeneratePrivateKey()
+		privateKey, publicKey, err := GenerateP256KeyPair()
 		if err != nil {
 			return err
 		}
-		extclient.PrivateKey = privateKey.String()
-		extclient.PublicKey = privateKey.PublicKey().String()
+		// Serialize private key (32 bytes big-endian → base64) for storage
+		privB64, serr := SerializeP256PrivateKey(privateKey)
+		if serr != nil {
+			return serr
+		}
+		extclient.PrivateKey = privB64
+		extclient.PublicKey = publicKey
 	} else if len(extclient.PrivateKey) == 0 && len(extclient.PublicKey) > 0 {
 		extclient.PrivateKey = "[ENTER PRIVATE KEY]"
 	}
@@ -805,8 +809,8 @@ func GetUniquePolicies(policies1, policies2 []models.Acl) []models.Acl {
 	return policies2
 }
 
-func GetExtPeers(node, peer *models.Node) ([]wgtypes.PeerConfig, []models.IDandAddr, []models.EgressNetworkRoutes, error) {
-	var peers []wgtypes.PeerConfig
+func GetExtPeers(node, peer *models.Node) ([]models.FIPSPeerConfig, []models.IDandAddr, []models.EgressNetworkRoutes, error) {
+	var peers []models.FIPSPeerConfig
 	var idsAndAddr []models.IDandAddr
 	var egressRoutes []models.EgressNetworkRoutes
 	extPeers, err := GetNetworkExtClients(node.Network)
@@ -832,19 +836,18 @@ func GetExtPeers(node, peer *models.Node) ([]wgtypes.PeerConfig, []models.IDandA
 			}
 		}
 
-		pubkey, err := wgtypes.ParseKey(extPeer.PublicKey)
-		if err != nil {
+		if err := ValidatePublicKey(extPeer.PublicKey); err != nil {
 			logger.Log(1, "error parsing ext pub key:", err.Error())
 			continue
 		}
 
-		if host.PublicKey.String() == extPeer.PublicKey ||
+		if host.PublicKey == extPeer.PublicKey ||
 			extPeer.IngressGatewayID != node.ID.String() || !extPeer.Enabled {
 			continue
 		}
 
 		var allowedips []net.IPNet
-		var peer wgtypes.PeerConfig
+		var peer models.FIPSPeerConfig
 		if extPeer.Address != "" {
 			var peeraddr = net.IPNet{
 				IP:   net.ParseIP(extPeer.Address),
@@ -875,14 +878,14 @@ func GetExtPeers(node, peer *models.Node) ([]wgtypes.PeerConfig, []models.IDandA
 		if primaryAddr == "" {
 			primaryAddr = extPeer.Address6
 		}
-		peer = wgtypes.PeerConfig{
-			PublicKey:         pubkey,
+		peer = models.FIPSPeerConfig{
+			PublicKey:         extPeer.PublicKey,
 			ReplaceAllowedIPs: true,
 			AllowedIPs:        allowedips,
 		}
 		peers = append(peers, peer)
 		idsAndAddr = append(idsAndAddr, models.IDandAddr{
-			ID:          peer.PublicKey.String(),
+			ID:          extPeer.PublicKey,
 			Name:        extPeer.ClientID,
 			Address:     primaryAddr,
 			IsExtClient: true,
